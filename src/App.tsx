@@ -1,4 +1,4 @@
-import { useState, useRef, CSSProperties } from 'react'
+import { useState, useEffect, useRef, CSSProperties } from 'react'
 import { Analytics } from '@vercel/analytics/react'
 
 // ─── Analytics ───────────────────────────────────────────────────────────────
@@ -754,6 +754,14 @@ function ResultsScreen({
   onReset: () => void
   onBack: () => void
 }) {
+  const [showDonationModal, setShowDonationModal] = useState(false)
+
+  // Show donation modal after 4 seconds
+  useEffect(() => {
+    const t = setTimeout(() => setShowDonationModal(true), 4000)
+    return () => clearTimeout(t)
+  }, [])
+
   const itemsSubtotal = items.reduce((s, i) => s + i.price, 0)
 
   // Ground-truth: total charges = receipt total minus all item prices
@@ -895,32 +903,31 @@ function ResultsScreen({
         ↓ Save as Image
       </button>
 
-      {/* Donation banner */}
+      {/* Compact donation footer */}
       <div style={{
-        background: 'rgba(255,255,255,0.04)',
-        border: '1px solid rgba(255,255,255,0.09)',
-        borderRadius: 16, padding: '18px 20px',
-        display: 'flex', flexDirection: 'column', gap: 12,
-        textAlign: 'center',
+        background: 'rgba(255,255,255,0.03)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 16, padding: '14px 18px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
       }}>
-        <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, lineHeight: 1.6, margin: 0 }}>
-          SplitTab is free to use, but not free to run — AI analyses every receipt and that costs a little each time. If SplitTab made your night easier, a small donation keeps it alive. Thank you 🙏
+        <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, lineHeight: 1.5, margin: 0, flex: 1 }}>
+          Found this useful? Keep SplitTab alive ☕
         </p>
         <a
           href="https://PayPal.Me/ReganLeatch"
           target="_blank"
           rel="noopener noreferrer"
-          onClick={() => trackEvent('donation_click')}
+          onClick={() => trackEvent('donation_click_footer')}
           style={{
-            display: 'inline-block',
-            background: 'linear-gradient(135deg, #0070BA, #003087)',
-            border: 'none', borderRadius: 12, color: '#fff',
-            fontWeight: 700, fontSize: 15, padding: '12px 24px',
+            display: 'inline-block', whiteSpace: 'nowrap',
+            background: 'rgba(245,158,11,0.15)',
+            border: '1px solid rgba(245,158,11,0.35)',
+            borderRadius: 10, color: '#F59E0B',
+            fontWeight: 700, fontSize: 13, padding: '8px 14px',
             cursor: 'pointer', textDecoration: 'none',
-            boxShadow: '0 4px 16px rgba(0,112,186,0.4)',
           }}
         >
-          ☕ Buy me a coffee
+          Donate
         </a>
       </div>
 
@@ -936,6 +943,86 @@ function ResultsScreen({
       >
         Start New Split
       </button>
+
+      {/* Donation modal */}
+      {showDonationModal && (
+        <div
+          onClick={() => setShowDonationModal(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            background: 'rgba(0,0,0,0.7)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+            padding: '0 16px 32px',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#12121f',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 24, padding: '28px 24px',
+              width: '100%', maxWidth: 480,
+              display: 'flex', flexDirection: 'column', gap: 20,
+              textAlign: 'center',
+            }}
+          >
+            {/* Dismiss */}
+            <button
+              onClick={() => setShowDonationModal(false)}
+              style={{
+                position: 'absolute', alignSelf: 'flex-end',
+                background: 'none', border: 'none',
+                color: 'rgba(255,255,255,0.3)', fontSize: 22,
+                cursor: 'pointer', lineHeight: 1, marginTop: -8,
+              }}
+            >×</button>
+
+            <div>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>☕</div>
+              <h3 style={{ color: '#fff', fontWeight: 800, fontSize: 20, margin: '0 0 10px' }}>
+                Most people scroll past this.
+              </h3>
+              <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 14, lineHeight: 1.6, margin: 0 }}>
+                If you're not most people — the AI just did the maths so you didn't have to. SplitTab is free to use but costs a little each time. Even a small tip keeps it running. Thank you 🙏
+              </p>
+            </div>
+
+            {/* Amount buttons */}
+            <div style={{ display: 'flex', gap: 10 }}>
+              {[['$2', '2'], ['$5', '5'], ['$10', '10']].map(([label, amount]) => (
+                <a
+                  key={amount}
+                  href={`https://PayPal.Me/ReganLeatch/${amount}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => { trackEvent('donation_click', { amount }); setShowDonationModal(false) }}
+                  style={{
+                    flex: 1, textAlign: 'center', textDecoration: 'none',
+                    background: 'linear-gradient(135deg, #7C3AED, #EC4899)',
+                    borderRadius: 14, color: '#fff',
+                    fontWeight: 800, fontSize: 18, padding: '14px 0',
+                    boxShadow: '0 4px 20px rgba(124,58,237,0.35)',
+                  }}
+                >
+                  {label}
+                </a>
+              ))}
+            </div>
+
+            <button
+              onClick={() => { trackEvent('donation_dismissed'); setShowDonationModal(false) }}
+              style={{
+                background: 'none', border: 'none',
+                color: 'rgba(255,255,255,0.3)', fontSize: 13,
+                cursor: 'pointer', padding: 0,
+              }}
+            >
+              No thanks
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 
