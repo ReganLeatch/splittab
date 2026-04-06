@@ -1,6 +1,13 @@
 import { useState, useRef, CSSProperties } from 'react'
 import { Analytics } from '@vercel/analytics/react'
 
+// ─── Analytics ───────────────────────────────────────────────────────────────
+const trackEvent = (name: string, params?: Record<string, string>) => {
+  if (typeof window !== 'undefined' && (window as any).gtag) {
+    ;(window as any).gtag('event', name, params ?? {})
+  }
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Person { id: number; name: string; colorIdx: number }
 interface ReceiptItem {
@@ -282,6 +289,7 @@ function ReceiptScreen({
     if (!image) return
     setLoading(true)
     setError(null)
+    trackEvent('analyse_receipt')
     try {
       const base64 = image.split(',')[1]
       const mediaType = image.split(';')[0].split(':')[1]
@@ -875,7 +883,7 @@ function ResultsScreen({
       </div>
 
       <button
-        onClick={downloadImage}
+        onClick={() => { trackEvent('save_image'); downloadImage() }}
         style={{
           background: 'linear-gradient(135deg, #7C3AED, #EC4899)',
           border: 'none', borderRadius: 16, color: '#fff',
@@ -887,8 +895,37 @@ function ResultsScreen({
         ↓ Save as Image
       </button>
 
+      {/* Donation banner */}
+      <div style={{
+        background: 'rgba(255,255,255,0.04)',
+        border: '1px solid rgba(255,255,255,0.09)',
+        borderRadius: 16, padding: '18px 20px',
+        display: 'flex', flexDirection: 'column', gap: 12,
+        textAlign: 'center',
+      }}>
+        <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+          SplitTab is free to use, but not free to run — AI analyses every receipt and that costs a little each time. If SplitTab made your night easier, a small donation keeps it alive. Thank you 🙏
+        </p>
+        <a
+          href="https://PayPal.Me/ReganLeatch"
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={() => trackEvent('donation_click')}
+          style={{
+            display: 'inline-block',
+            background: 'linear-gradient(135deg, #0070BA, #003087)',
+            border: 'none', borderRadius: 12, color: '#fff',
+            fontWeight: 700, fontSize: 15, padding: '12px 24px',
+            cursor: 'pointer', textDecoration: 'none',
+            boxShadow: '0 4px 16px rgba(0,112,186,0.4)',
+          }}
+        >
+          ☕ Buy me a coffee
+        </a>
+      </div>
+
       <button
-        onClick={onReset}
+        onClick={() => { trackEvent('new_split'); onReset() }}
         style={{
           background: 'rgba(255,255,255,0.07)',
           border: '1px solid rgba(255,255,255,0.12)',
