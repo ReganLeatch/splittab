@@ -1,4 +1,5 @@
 import { useState, useRef, CSSProperties } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Person { id: number; name: string; colorIdx: number }
@@ -1157,6 +1158,7 @@ export default function App() {
           />
         )}
       </div>
+      <Analytics />
     </div>
   )
 }
