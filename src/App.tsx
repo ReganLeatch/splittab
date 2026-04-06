@@ -755,6 +755,13 @@ function ResultsScreen({
   onBack: () => void
 }) {
   const [showDonationModal, setShowDonationModal] = useState(false)
+  const HEADLINES = [
+    "You just avoided the most awkward conversation of the night.",
+    "The bill is split. The developer is still hungry.",
+    "Show your working. Just kidding — we did it for you.",
+    "Your 10th grade math teacher would be proud.",
+  ]
+  const headline = HEADLINES[Math.floor(Math.random() * HEADLINES.length)]
 
   // Show donation modal after 4 seconds
   useEffect(() => {
@@ -903,32 +910,51 @@ function ResultsScreen({
         ↓ Save as Image
       </button>
 
-      {/* Compact donation footer */}
+      {/* Bottom donation banner */}
       <div style={{
         background: 'rgba(255,255,255,0.03)',
         border: '1px solid rgba(255,255,255,0.08)',
-        borderRadius: 16, padding: '14px 18px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        borderRadius: 16, padding: '18px 20px',
+        display: 'flex', flexDirection: 'column', gap: 14, textAlign: 'center',
       }}>
-        <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, lineHeight: 1.5, margin: 0, flex: 1 }}>
-          Found this useful? Keep SplitTab alive ☕
+        <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+          SplitTab is free to use, but not free to run — AI analyses every receipt and that costs a little each time. If SplitTab made your night easier, a small donation keeps it alive. Thank you 🙏
         </p>
-        <a
-          href="https://PayPal.Me/ReganLeatch"
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={() => trackEvent('donation_click_footer')}
-          style={{
-            display: 'inline-block', whiteSpace: 'nowrap',
-            background: 'rgba(245,158,11,0.15)',
-            border: '1px solid rgba(245,158,11,0.35)',
-            borderRadius: 10, color: '#F59E0B',
-            fontWeight: 700, fontSize: 13, padding: '8px 14px',
-            cursor: 'pointer', textDecoration: 'none',
-          }}
-        >
-          Donate
-        </a>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[['$2', '2'], ['$5', '5'], ['$10', '10']].map(([label, amount]) => (
+            <a
+              key={amount}
+              href={`https://PayPal.Me/ReganLeatch/${amount}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => trackEvent('donation_click_footer', { amount })}
+              style={{
+                flex: 1, textAlign: 'center', textDecoration: 'none',
+                background: 'linear-gradient(135deg, #7C3AED, #EC4899)',
+                borderRadius: 12, color: '#fff',
+                fontWeight: 800, fontSize: 16, padding: '12px 0',
+                boxShadow: '0 4px 16px rgba(124,58,237,0.3)',
+              }}
+            >
+              {label}
+            </a>
+          ))}
+          <a
+            href="https://PayPal.Me/ReganLeatch"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => trackEvent('donation_click_footer', { amount: 'custom' })}
+            style={{
+              flex: 1, textAlign: 'center', textDecoration: 'none',
+              background: 'rgba(255,255,255,0.07)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 12, color: 'rgba(255,255,255,0.7)',
+              fontWeight: 700, fontSize: 13, padding: '12px 0',
+            }}
+          >
+            Other
+          </a>
+        </div>
       </div>
 
       <button
@@ -950,10 +976,10 @@ function ResultsScreen({
           onClick={() => setShowDonationModal(false)}
           style={{
             position: 'fixed', inset: 0, zIndex: 100,
-            background: 'rgba(0,0,0,0.7)',
+            background: 'rgba(0,0,0,0.75)',
             backdropFilter: 'blur(6px)',
-            display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-            padding: '0 16px 32px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '0 16px',
           }}
         >
           <div
@@ -964,32 +990,32 @@ function ResultsScreen({
               borderRadius: 24, padding: '28px 24px',
               width: '100%', maxWidth: 480,
               display: 'flex', flexDirection: 'column', gap: 20,
-              textAlign: 'center',
+              textAlign: 'center', position: 'relative',
             }}
           >
-            {/* Dismiss */}
+            {/* Dismiss X */}
             <button
               onClick={() => setShowDonationModal(false)}
               style={{
-                position: 'absolute', alignSelf: 'flex-end',
+                position: 'absolute', top: 16, right: 16,
                 background: 'none', border: 'none',
                 color: 'rgba(255,255,255,0.3)', fontSize: 22,
-                cursor: 'pointer', lineHeight: 1, marginTop: -8,
+                cursor: 'pointer', lineHeight: 1, padding: 0,
               }}
             >×</button>
 
             <div>
               <div style={{ fontSize: 40, marginBottom: 10 }}>☕</div>
-              <h3 style={{ color: '#fff', fontWeight: 800, fontSize: 20, margin: '0 0 10px' }}>
-                Most people scroll past this.
+              <h3 style={{ color: '#fff', fontWeight: 800, fontSize: 20, margin: '0 0 12px', lineHeight: 1.3 }}>
+                {headline}
               </h3>
               <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 14, lineHeight: 1.6, margin: 0 }}>
-                If you're not most people — the AI just did the maths so you didn't have to. SplitTab is free to use but costs a little each time. Even a small tip keeps it running. Thank you 🙏
+                SplitTab is free to use, but not free to run — AI analyses every receipt and that costs a little each time. If SplitTab made your night easier, a small donation keeps it alive. Thank you 🙏
               </p>
             </div>
 
             {/* Amount buttons */}
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
               {[['$2', '2'], ['$5', '5'], ['$10', '10']].map(([label, amount]) => (
                 <a
                   key={amount}
@@ -1008,6 +1034,22 @@ function ResultsScreen({
                   {label}
                 </a>
               ))}
+              <a
+                href="https://PayPal.Me/ReganLeatch"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => { trackEvent('donation_click', { amount: 'custom' }); setShowDonationModal(false) }}
+                style={{
+                  flex: 1, textAlign: 'center', textDecoration: 'none',
+                  background: 'rgba(255,255,255,0.07)',
+                  border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: 14, color: 'rgba(255,255,255,0.7)',
+                  fontWeight: 700, fontSize: 13, padding: '14px 0',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                Other
+              </a>
             </div>
 
             <button
