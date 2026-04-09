@@ -25,7 +25,17 @@ interface Bill {
   extras: Extra[]
   receiptTotal: number
 }
-type Screen = 'setup' | 'receipt' | 'assign' | 'results'
+interface TabSession { personId: number; name: string; lastSeen: number }
+interface TabData {
+  code: string
+  people: Person[]
+  bills: Bill[]
+  createdAt: number
+  lastActive: number
+  lastActiveBy: string
+  sessions: TabSession[]
+}
+type Screen = 'setup' | 'join' | 'receipt' | 'assign' | 'results'
 
 // ─── Design Tokens ───────────────────────────────────────────────────────────
 const BG = '#07070e'
@@ -210,24 +220,32 @@ function PersonAvatar({
 // ─── Setup Screen ─────────────────────────────────────────────────────────────
 function SetupScreen({
   onStart,
+  onJoin,
 }: {
-  onStart: (people: Person[]) => void
+  onStart: (people: Person[], myPersonId: number) => void
+  onJoin: () => void
 }) {
   const [nameInput, setNameInput] = useState('')
   const [people, setPeople] = useState<Person[]>([])
+  const [myPersonId, setMyPersonId] = useState<number | null>(null)
 
   const addPerson = () => {
     const name = nameInput.trim()
     if (!name) return
-    setPeople(p => [...p, { id: Date.now(), name, colorIdx: p.length }])
+    const newPerson: Person = { id: Date.now(), name, colorIdx: people.length }
+    setPeople(p => [...p, newPerson])
     setNameInput('')
+    if (myPersonId === null) setMyPersonId(newPerson.id)
   }
 
-  const removePerson = (id: number) => setPeople(p => p.filter(x => x.id !== id))
+  const removePerson = (id: number) => {
+    setPeople(p => p.filter(x => x.id !== id))
+    if (myPersonId === id) setMyPersonId(null)
+  }
 
   const handleStart = () => {
-    if (people.length < 2) return
-    onStart(people)
+    if (people.length < 2 || myPersonId === null) return
+    onStart(people, myPersonId)
   }
 
   const inputStyle: CSSProperties = {
@@ -297,25 +315,65 @@ function SetupScreen({
         </div>
       </div>
 
+      {/* Who are you? */}
+      {people.length > 0 && (
+        <div style={glassCard({ padding: 20 })}>
+          <label style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            Who are you?
+          </label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+            {people.map(p => (
+              <button
+                key={p.id}
+                onClick={() => setMyPersonId(p.id)}
+                style={{
+                  background: myPersonId === p.id ? COLORS[p.colorIdx % COLORS.length].bg : COLORS[p.colorIdx % COLORS.length].dim,
+                  border: `2px solid ${myPersonId === p.id ? COLORS[p.colorIdx % COLORS.length].bg : 'rgba(255,255,255,0.12)'}`,
+                  borderRadius: 100, padding: '7px 14px', color: '#fff',
+                  fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                  boxShadow: myPersonId === p.id ? `0 0 12px 3px ${COLORS[p.colorIdx % COLORS.length].glow}` : 'none',
+                  transition: 'all 0.15s',
+                }}
+              >{p.name}</button>
+            ))}
+          </div>
+          {myPersonId === null && (
+            <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, marginTop: 8 }}>Select your name so we know who added this tab</p>
+          )}
+        </div>
+      )}
+
       {/* CTA */}
       <button
         onClick={handleStart}
-        disabled={people.length < 2}
+        disabled={people.length < 2 || myPersonId === null}
         style={{
-          background: people.length < 2
+          background: (people.length < 2 || myPersonId === null)
             ? 'rgba(255,255,255,0.08)'
             : 'linear-gradient(135deg, #7C3AED 0%, #EC4899 100%)',
           border: 'none', borderRadius: 16, color: '#fff',
           fontWeight: 700, fontSize: 17, padding: '16px',
-          cursor: people.length < 2 ? 'not-allowed' : 'pointer',
-          boxShadow: people.length < 2
+          cursor: (people.length < 2 || myPersonId === null) ? 'not-allowed' : 'pointer',
+          boxShadow: (people.length < 2 || myPersonId === null)
             ? 'none'
             : '0 6px 28px rgba(124,58,237,0.5)',
           transition: 'all 0.2s',
-          opacity: people.length < 2 ? 0.5 : 1,
+          opacity: (people.length < 2 || myPersonId === null) ? 0.5 : 1,
         }}
       >
         Scan Receipt →
+      </button>
+
+      {/* Join existing tab */}
+      <button
+        onClick={onJoin}
+        style={{
+          background: 'none', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 16,
+          color: 'rgba(255,255,255,0.6)', fontWeight: 600, fontSize: 15, padding: '14px',
+          cursor: 'pointer', transition: 'all 0.2s',
+        }}
+      >
+        Join existing tab →
       </button>
     </div>
   )
@@ -997,6 +1055,155 @@ function AssignScreen({
   )
 }
 
+// ─── Join Screen ──────────────────────────────────────────────────────────────
+function JoinScreen({
+  onJoined,
+  onBack,
+}: {
+  onJoined: (tab: TabData, myPersonId: number) => void
+  onBack: () => void
+}) {
+  const [code, setCode] = useState('')
+  const [tab, setTab] = useState<TabData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [myPersonId, setMyPersonId] = useState<number | null>(null)
+  const [newName, setNewName] = useState('')
+
+  const loadTab = async () => {
+    const trimmed = code.trim().toUpperCase()
+    if (!trimmed) return
+    setLoading(true)
+    setError(null)
+    setTab(null)
+    setMyPersonId(null)
+    try {
+      const res = await fetch(`/api/tab/load?code=${trimmed}`)
+      if (!res.ok) { setError('Tab not found. Check the code and try again.'); return }
+      const data: TabData = await res.json()
+      setTab(data)
+    } catch {
+      setError('Failed to load tab. Try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const addSelf = () => {
+    const name = newName.trim()
+    if (!name || !tab) return
+    const newPerson: Person = { id: Date.now(), name, colorIdx: tab.people.length }
+    const updated = { ...tab, people: [...tab.people, newPerson] }
+    setTab(updated)
+    setMyPersonId(newPerson.id)
+    setNewName('')
+  }
+
+  const inputStyle: CSSProperties = {
+    width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: 12, padding: '12px 14px', color: '#fff', fontSize: 16, outline: 'none',
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 32 }}>
+      <div style={{ textAlign: 'center', paddingTop: 8 }}>
+        <Logo size={48} />
+        <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 14, marginTop: 6 }}>Join an existing tab</p>
+      </div>
+
+      <div style={glassCard({ padding: 20 })}>
+        <label style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          Enter tab code
+        </label>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <input
+            placeholder="e.g. A3BX7K"
+            value={code}
+            onChange={e => setCode(e.target.value.toUpperCase())}
+            onKeyDown={e => e.key === 'Enter' && loadTab()}
+            style={{ ...inputStyle, flex: 1, letterSpacing: '0.15em', fontWeight: 700, fontSize: 18 }}
+            maxLength={6}
+          />
+          <button onClick={loadTab} disabled={loading || code.trim().length === 0} style={{
+            background: 'linear-gradient(135deg, #7C3AED, #EC4899)', border: 'none', borderRadius: 12,
+            color: '#fff', fontWeight: 700, fontSize: 14, padding: '0 18px', cursor: 'pointer',
+            opacity: loading || code.trim().length === 0 ? 0.5 : 1,
+          }}>
+            {loading ? '…' : 'Load'}
+          </button>
+        </div>
+        {error && <p style={{ color: '#F87171', fontSize: 13, marginTop: 8 }}>{error}</p>}
+      </div>
+
+      {tab && (
+        <>
+          <div style={glassCard({ padding: 20 })}>
+            <label style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              Who are you?
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+              {tab.people.map(p => (
+                <button key={p.id} onClick={() => setMyPersonId(p.id)} style={{
+                  background: myPersonId === p.id ? COLORS[p.colorIdx % COLORS.length].bg : COLORS[p.colorIdx % COLORS.length].dim,
+                  border: `2px solid ${myPersonId === p.id ? COLORS[p.colorIdx % COLORS.length].bg : 'rgba(255,255,255,0.12)'}`,
+                  borderRadius: 100, padding: '7px 14px', color: '#fff',
+                  fontWeight: 600, fontSize: 14, cursor: 'pointer',
+                  boxShadow: myPersonId === p.id ? `0 0 12px 3px ${COLORS[p.colorIdx % COLORS.length].glow}` : 'none',
+                  transition: 'all 0.15s',
+                }}>{p.name}</button>
+              ))}
+            </div>
+            <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, marginTop: 10 }}>Not on the list?</p>
+            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+              <input
+                placeholder="Add your name…"
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addSelf()}
+                style={{ ...inputStyle, flex: 1 }}
+              />
+              <button onClick={addSelf} style={{
+                background: 'linear-gradient(135deg, #7C3AED, #EC4899)', border: 'none', borderRadius: 12,
+                color: '#fff', fontWeight: 700, fontSize: 18, width: 46, cursor: 'pointer',
+              }}>+</button>
+            </div>
+          </div>
+
+          {tab.bills.length > 0 && (
+            <div style={glassCard({ padding: 16 })}>
+              <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
+                {tab.bills.length} bill{tab.bills.length !== 1 ? 's' : ''} already in this tab
+              </p>
+              <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>
+                Last updated by {tab.lastActiveBy}
+              </p>
+            </div>
+          )}
+
+          <button
+            onClick={() => myPersonId !== null && onJoined(tab, myPersonId)}
+            disabled={myPersonId === null}
+            style={{
+              background: myPersonId === null ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg, #7C3AED 0%, #EC4899 100%)',
+              border: 'none', borderRadius: 16, color: '#fff', fontWeight: 700, fontSize: 17, padding: '16px',
+              cursor: myPersonId === null ? 'not-allowed' : 'pointer',
+              boxShadow: myPersonId === null ? 'none' : '0 6px 28px rgba(124,58,237,0.5)',
+              opacity: myPersonId === null ? 0.5 : 1, transition: 'all 0.2s',
+            }}
+          >
+            Join Tab & Add Bill →
+          </button>
+        </>
+      )}
+
+      <button onClick={onBack} style={{
+        background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)',
+        fontSize: 14, cursor: 'pointer', padding: '8px 0',
+      }}>← Back</button>
+    </div>
+  )
+}
+
 // ─── Results Screen ────────────────────────────────────────────────────────────
 function ResultsScreen({
   items,
@@ -1005,9 +1212,12 @@ function ResultsScreen({
   people,
   completedBills,
   currentPayerId,
+  tabCode,
+  conflictWarning,
   onReset,
   onBack,
   onAddBill,
+  onRefresh,
 }: {
   items: ReceiptItem[]
   extras: Extra[]
@@ -1015,9 +1225,12 @@ function ResultsScreen({
   people: Person[]
   completedBills: Bill[]
   currentPayerId: number | null
+  tabCode: string | null
+  conflictWarning: string | null
   onReset: () => void
   onBack: () => void
   onAddBill: () => void
+  onRefresh: () => void
 }) {
   const [showDonationModal, setShowDonationModal] = useState(false)
   const [expandedPersonIds, setExpandedPersonIds] = useState<number[]>([])
@@ -1130,6 +1343,51 @@ function ResultsScreen({
           Total: {fmt(grandTotal)}
         </p>
       </div>
+
+      {/* Tab code card */}
+      {tabCode && (
+        <div style={glassCard({ padding: 16, textAlign: 'center' })}>
+          <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', margin: '0 0 6px' }}>
+            Tab Code — share this to let others add their bills
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+            <span style={{
+              fontWeight: 800, fontSize: 28, letterSpacing: '0.18em', color: '#fff',
+              background: 'rgba(255,255,255,0.06)', borderRadius: 10, padding: '6px 18px',
+            }}>{tabCode}</span>
+            <button
+              onClick={() => { navigator.clipboard.writeText(tabCode); trackEvent('copy_tab_code') }}
+              style={{
+                background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: 10, color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 600,
+                padding: '8px 14px', cursor: 'pointer',
+              }}
+            >Copy</button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 10 }}>
+            <button
+              onClick={onRefresh}
+              style={{
+                background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)',
+                borderRadius: 10, color: 'rgba(167,139,250,0.9)', fontSize: 13, fontWeight: 600,
+                padding: '7px 14px', cursor: 'pointer',
+              }}
+            >↻ Refresh</button>
+            <span style={{ color: 'rgba(255,255,255,0.25)', fontSize: 12 }}>Tab expires in 7 days</span>
+          </div>
+        </div>
+      )}
+
+      {/* Conflict warning */}
+      {conflictWarning && (
+        <div style={{
+          background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.3)',
+          borderRadius: 14, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <span style={{ fontSize: 18 }}>⚠️</span>
+          <p style={{ color: 'rgba(255,220,100,0.9)', fontSize: 13, margin: 0 }}>{conflictWarning}</p>
+        </div>
+      )}
 
       {/* Per-person cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1761,9 +2019,60 @@ export default function App() {
   const [receiptTotal, setReceiptTotal] = useState(0)
   const [completedBills, setCompletedBills] = useState<Bill[]>([])
   const [currentPayerId, setCurrentPayerId] = useState<number | null>(null)
+  const [tabCode, setTabCode] = useState<string | null>(null)
+  const [myPersonId, setMyPersonId] = useState<number | null>(null)
+  const [conflictWarning, setConflictWarning] = useState<string | null>(null)
 
-  const handleSetupDone = (ppl: Person[]) => {
+  // Heartbeat — keep session alive and detect conflicts
+  useEffect(() => {
+    if (!tabCode || !myPersonId || screen === 'setup' || screen === 'join') return
+    const myName = people.find(p => p.id === myPersonId)?.name ?? 'Unknown'
+    const beat = async () => {
+      try {
+        const res = await fetch('/api/tab/heartbeat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: tabCode, personId: myPersonId, name: myName }),
+        })
+        if (!res.ok) return
+        const { activeSessions } = await res.json()
+        if (activeSessions.length > 0) {
+          const names = activeSessions.map((s: { name: string }) => s.name).join(', ')
+          setConflictWarning(`${names} is also active on this tab right now. Hit Refresh to see their latest bills.`)
+        } else {
+          setConflictWarning(null)
+        }
+      } catch { /* silent */ }
+    }
+    beat()
+    const interval = setInterval(beat, 30000)
+    return () => clearInterval(interval)
+  }, [tabCode, myPersonId, screen, people])
+
+  const handleSetupDone = async (ppl: Person[], pid: number) => {
     setPeople(ppl)
+    setMyPersonId(pid)
+    try {
+      const res = await fetch('/api/tab/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ people: ppl, myPersonId: pid }),
+      })
+      if (res.ok) {
+        const { code } = await res.json()
+        setTabCode(code)
+        trackEvent('tab_created')
+      }
+    } catch { /* non-fatal — tab just won't sync */ }
+    setScreen('receipt')
+  }
+
+  const handleJoined = (tab: TabData, pid: number) => {
+    setPeople(tab.people)
+    setMyPersonId(pid)
+    setTabCode(tab.code)
+    setCompletedBills(tab.bills)
+    trackEvent('tab_joined')
     setScreen('receipt')
   }
 
@@ -1775,8 +2084,25 @@ export default function App() {
     setScreen('assign')
   }
 
-  const handleAssignDone = (assignedItems: ReceiptItem[]) => {
+  const handleAssignDone = async (assignedItems: ReceiptItem[]) => {
     setItems(assignedItems)
+    if (tabCode && myPersonId !== null) {
+      const bill: Bill = {
+        id: `bill-${Date.now()}`,
+        payerId: currentPayerId,
+        items: assignedItems,
+        extras,
+        receiptTotal,
+      }
+      try {
+        await fetch('/api/tab/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: tabCode, bill, people, myPersonId }),
+        })
+        trackEvent('bill_saved_to_tab')
+      } catch { /* non-fatal */ }
+    }
     setScreen('results')
   }
 
@@ -1799,12 +2125,34 @@ export default function App() {
     setScreen('receipt')
   }
 
+  const handleRefresh = async () => {
+    if (!tabCode) return
+    try {
+      const res = await fetch(`/api/tab/load?code=${tabCode}`)
+      if (!res.ok) return
+      const tab: TabData = await res.json()
+      setPeople(tab.people)
+      setCompletedBills(tab.bills.slice(0, -1)) // all but last become completedBills
+      const last = tab.bills[tab.bills.length - 1]
+      if (last) {
+        setItems(last.items)
+        setExtras(last.extras)
+        setReceiptTotal(last.receiptTotal)
+        setCurrentPayerId(last.payerId)
+      }
+      trackEvent('tab_refreshed')
+    } catch { /* silent */ }
+  }
+
   const handleReset = () => {
     setItems([])
     setExtras([])
     setReceiptTotal(0)
     setCompletedBills([])
     setCurrentPayerId(null)
+    setTabCode(null)
+    setMyPersonId(null)
+    setConflictWarning(null)
     setScreen('setup')
   }
 
@@ -1817,7 +2165,10 @@ export default function App() {
         padding: '20px 16px',
       }}>
         {screen === 'setup' && (
-          <SetupScreen onStart={handleSetupDone} />
+          <SetupScreen onStart={handleSetupDone} onJoin={() => setScreen('join')} />
+        )}
+        {screen === 'join' && (
+          <JoinScreen onJoined={handleJoined} onBack={() => setScreen('setup')} />
         )}
         {screen === 'receipt' && (
           <ReceiptScreen
@@ -1846,9 +2197,12 @@ export default function App() {
             people={people}
             completedBills={completedBills}
             currentPayerId={currentPayerId}
+            tabCode={tabCode}
+            conflictWarning={conflictWarning}
             onReset={handleReset}
             onBack={() => setScreen('assign')}
             onAddBill={handleAddAnotherBill}
+            onRefresh={handleRefresh}
           />
         )}
       </div>
