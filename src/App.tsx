@@ -2305,8 +2305,21 @@ export default function App() {
       ? { id: 'current', payerId: currentPayerId, items, extras, receiptTotal }
       : completedBills.find(b => b.id === billId)
     if (!bill) return
-    // Load bill data into current state for editing.
-    // We do NOT remove it from completedBills — handleAssignDone will replace it in-place via .map()
+
+    // If editing a completed bill while there is a non-empty "current" bill,
+    // flush the current bill into completedBills first so its data is not lost
+    // when we overwrite the current state below.
+    if (billId !== 'current' && (items.length > 0 || receiptTotal > 0)) {
+      setCompletedBills(prev => [...prev, {
+        id: `bill-flushed-${Date.now()}`,
+        payerId: currentPayerId,
+        items,
+        extras,
+        receiptTotal,
+      }])
+    }
+
+    // Load the target bill into the current edit state
     setItems(bill.items)
     setExtras(bill.extras)
     setReceiptTotal(bill.receiptTotal)
