@@ -637,14 +637,14 @@ function ReceiptScreen({
       {/* Who paid? */}
       <div style={glassCard({ padding: 16 })}>
         <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '0 0 12px' }}>
-          Who paid this bill? <span style={{ color: 'rgba(255,255,255,0.25)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional — needed for settlement)</span>
+          Who paid this bill?
         </p>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {people.map(p => {
             const c = COLORS[p.colorIdx % COLORS.length]
             const selected = payerId === p.id
             return (
-              <button key={p.id} onClick={() => setPayerId(selected ? null : p.id)} style={{
+              <button key={p.id} onClick={() => setPayerId(p.id)} style={{
                 display: 'flex', alignItems: 'center', gap: 7,
                 background: selected ? c.dim : 'rgba(255,255,255,0.05)',
                 border: `1px solid ${selected ? c.bg : 'rgba(255,255,255,0.1)'}`,
@@ -661,33 +661,33 @@ function ReceiptScreen({
       {manualMode ? (
         <button
           onClick={submitManual}
-          disabled={manualItemsList.length === 0}
+          disabled={manualItemsList.length === 0 || payerId === null}
           style={{
-            background: manualItemsList.length === 0 ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg, #7C3AED, #EC4899)',
+            background: (manualItemsList.length === 0 || payerId === null) ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg, #7C3AED, #EC4899)',
             border: 'none', borderRadius: 16, color: '#fff',
             fontWeight: 700, fontSize: 17, padding: '16px',
-            cursor: manualItemsList.length === 0 ? 'not-allowed' : 'pointer',
-            opacity: manualItemsList.length === 0 ? 0.5 : 1,
+            cursor: (manualItemsList.length === 0 || payerId === null) ? 'not-allowed' : 'pointer',
+            opacity: (manualItemsList.length === 0 || payerId === null) ? 0.5 : 1,
             transition: 'all 0.2s',
           }}
         >
-          {manualItemsList.length === 0 ? 'Add at least one item' : `Assign ${manualItemsList.length} item${manualItemsList.length !== 1 ? 's' : ''} →`}
+          {manualItemsList.length === 0 ? 'Add at least one item' : payerId === null ? 'Select who paid first' : `Assign ${manualItemsList.length} item${manualItemsList.length !== 1 ? 's' : ''} →`}
         </button>
       ) : (
         <button
           onClick={analyze}
-          disabled={!image || loading}
+          disabled={!image || loading || payerId === null}
           style={{
-            background: (!image || loading) ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg, #7C3AED, #EC4899)',
+            background: (!image || loading || payerId === null) ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg, #7C3AED, #EC4899)',
             border: 'none', borderRadius: 16, color: '#fff',
             fontWeight: 700, fontSize: 17, padding: '16px',
-            cursor: (!image || loading) ? 'not-allowed' : 'pointer',
-            boxShadow: (!image || loading) ? 'none' : '0 6px 28px rgba(124,58,237,0.5)',
-            opacity: (!image || loading) ? 0.5 : 1,
+            cursor: (!image || loading || payerId === null) ? 'not-allowed' : 'pointer',
+            boxShadow: (!image || loading || payerId === null) ? 'none' : '0 6px 28px rgba(124,58,237,0.5)',
+            opacity: (!image || loading || payerId === null) ? 0.5 : 1,
             transition: 'all 0.2s',
           }}
         >
-          {loading ? 'Analysing…' : 'Extract Items →'}
+          {loading ? 'Analysing…' : payerId === null ? 'Select who paid first' : 'Extract Items →'}
         </button>
       )}
     </div>
@@ -1060,7 +1060,7 @@ function JoinScreen({
   onJoined,
   onBack,
 }: {
-  onJoined: (tab: TabData, myPersonId: number) => void
+  onJoined: (tab: TabData, myPersonId: number, destination: 'receipt' | 'results') => void
   onBack: () => void
 }) {
   const [code, setCode] = useState('')
@@ -1181,7 +1181,7 @@ function JoinScreen({
           )}
 
           <button
-            onClick={() => myPersonId !== null && onJoined(tab, myPersonId)}
+            onClick={() => myPersonId !== null && onJoined(tab, myPersonId, 'receipt')}
             disabled={myPersonId === null}
             style={{
               background: myPersonId === null ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg, #7C3AED 0%, #EC4899 100%)',
@@ -1191,7 +1191,21 @@ function JoinScreen({
               opacity: myPersonId === null ? 0.5 : 1, transition: 'all 0.2s',
             }}
           >
-            Join Tab & Add Bill →
+            Add a Bill →
+          </button>
+          <button
+            onClick={() => myPersonId !== null && onJoined(tab, myPersonId, 'results')}
+            disabled={myPersonId === null}
+            style={{
+              background: 'none',
+              border: `1px solid ${myPersonId === null ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.2)'}`,
+              borderRadius: 16, color: myPersonId === null ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.7)',
+              fontWeight: 600, fontSize: 15, padding: '14px',
+              cursor: myPersonId === null ? 'not-allowed' : 'pointer',
+              opacity: myPersonId === null ? 0.5 : 1, transition: 'all 0.2s',
+            }}
+          >
+            Just view results →
           </button>
         </>
       )}
@@ -1218,6 +1232,9 @@ function ResultsScreen({
   onBack,
   onAddBill,
   onRefresh,
+  onDeleteBill,
+  onEditBill,
+  onChangePayer,
 }: {
   items: ReceiptItem[]
   extras: Extra[]
@@ -1231,10 +1248,14 @@ function ResultsScreen({
   onBack: () => void
   onAddBill: () => void
   onRefresh: () => void
+  onDeleteBill: (billId: string) => void
+  onEditBill: (billId: string) => void
+  onChangePayer: (billId: string, payerId: number) => void
 }) {
   const [showDonationModal, setShowDonationModal] = useState(false)
   const [expandedPersonIds, setExpandedPersonIds] = useState<number[]>([])
   const [showExplanation, setShowExplanation] = useState(false)
+  const [expandedBillIds, setExpandedBillIds] = useState<string[]>([])
   const HEADLINES = [
     "You just avoided the most awkward conversation of the night.",
     "The bill is split. The developer is still hungry.",
@@ -1248,10 +1269,11 @@ function ResultsScreen({
     return () => clearTimeout(t)
   }, [])
 
-  // All bills including the current one
+  // All bills including the current one (skip if current is empty)
+  const currentBillEmpty = items.length === 0 && receiptTotal === 0
   const allBills: Bill[] = [
     ...completedBills,
-    { id: 'current', payerId: currentPayerId, items, extras, receiptTotal },
+    ...(currentBillEmpty ? [] : [{ id: 'current', payerId: currentPayerId, items, extras, receiptTotal }]),
   ]
   const isMultiBill = allBills.length > 1
 
@@ -1388,6 +1410,123 @@ function ResultsScreen({
           <p style={{ color: 'rgba(255,220,100,0.9)', fontSize: 13, margin: 0 }}>{conflictWarning}</p>
         </div>
       )}
+
+      {/* Bills section */}
+      <div style={glassCard({ padding: 16 })}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: allBills.length > 0 ? 12 : 0 }}>
+          <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', margin: 0 }}>
+            Bills ({allBills.length})
+          </p>
+          <button onClick={onAddBill} style={{
+            background: 'linear-gradient(135deg, #7C3AED, #EC4899)', border: 'none', borderRadius: 10,
+            color: '#fff', fontWeight: 700, fontSize: 13, padding: '6px 14px', cursor: 'pointer',
+          }}>+ Add Bill</button>
+        </div>
+        {allBills.length === 0 && (
+          <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13, margin: 0 }}>No bills yet.</p>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {allBills.map((bill, i) => {
+            const payer = bill.payerId !== null ? people.find(p => p.id === bill.payerId) : null
+            const billTotal = billEffectiveTotal(bill)
+            const isExpanded = expandedBillIds.includes(bill.id)
+            const toggleBill = () => setExpandedBillIds(prev =>
+              prev.includes(bill.id) ? prev.filter(x => x !== bill.id) : [...prev, bill.id]
+            )
+            return (
+              <div key={bill.id} style={{
+                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 12, overflow: 'hidden',
+              }}>
+                {/* Collapsed row */}
+                <div onClick={toggleBill} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '10px 14px', cursor: 'pointer',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>Bill {i + 1}</span>
+                    {payer && (
+                      <span style={{
+                        background: COLORS[payer.colorIdx % COLORS.length].dim,
+                        border: `1px solid ${COLORS[payer.colorIdx % COLORS.length].bg}55`,
+                        borderRadius: 100, padding: '2px 8px', fontSize: 12, color: '#fff', fontWeight: 500,
+                      }}>{payer.name}</span>
+                    )}
+                    {!payer && (
+                      <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>No payer</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: 600 }}>{fmt(billTotal)}</span>
+                    <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>{isExpanded ? '▲' : '▼'}</span>
+                  </div>
+                </div>
+
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {/* Inline payer selector */}
+                    <div>
+                      <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', margin: '0 0 6px' }}>Who paid</p>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {people.map(p => {
+                          const isSelected = bill.payerId === p.id
+                          const c = COLORS[p.colorIdx % COLORS.length]
+                          return (
+                            <button key={p.id} onClick={() => onChangePayer(bill.id, p.id)} style={{
+                              background: isSelected ? c.bg : c.dim,
+                              border: `1px solid ${isSelected ? c.bg : 'rgba(255,255,255,0.1)'}`,
+                              borderRadius: 100, padding: '4px 12px', color: '#fff',
+                              fontSize: 13, fontWeight: isSelected ? 700 : 400, cursor: 'pointer',
+                              boxShadow: isSelected ? `0 0 8px 2px ${c.glow}` : 'none',
+                              transition: 'all 0.12s',
+                            }}>{p.name}</button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    {/* Items */}
+                    {bill.items.length > 0 && (
+                      <div>
+                        <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', margin: '0 0 6px' }}>Items</p>
+                        {bill.items.map((item, idx) => {
+                          const assigned = item.assignedTo.map(id => people.find(p => p.id === id)?.name).filter(Boolean).join(', ')
+                          return (
+                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+                              <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+                                <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: 13 }}>
+                                  {item.quantity > 1 ? `${item.quantity}× ` : ''}{item.name}
+                                </span>
+                                {assigned && <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}> → {assigned}</span>}
+                              </div>
+                              <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, flexShrink: 0 }}>{fmt(item.price)}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
+                      <button onClick={() => onEditBill(bill.id)} style={{
+                        flex: 1, background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.3)',
+                        borderRadius: 10, color: 'rgba(167,139,250,0.9)', fontSize: 13, fontWeight: 600,
+                        padding: '8px', cursor: 'pointer',
+                      }}>Edit Assignments →</button>
+                      <button onClick={() => {
+                        if (window.confirm(`Delete Bill ${i + 1}?`)) onDeleteBill(bill.id)
+                      }} style={{
+                        background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+                        borderRadius: 10, color: 'rgba(252,165,165,0.9)', fontSize: 13, fontWeight: 600,
+                        padding: '8px 14px', cursor: 'pointer',
+                      }}>Delete</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
 
       {/* Per-person cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -1643,20 +1782,6 @@ function ResultsScreen({
           )}
         </div>
       )}
-
-      {/* Add another bill */}
-      <button
-        onClick={onAddBill}
-        style={{
-          background: 'rgba(255,255,255,0.07)',
-          border: '1px solid rgba(255,255,255,0.15)',
-          borderRadius: 16, color: '#fff',
-          fontWeight: 600, fontSize: 16, padding: '14px',
-          cursor: 'pointer',
-        }}
-      >
-        + Add Another Bill
-      </button>
 
       <button
         onClick={() => { trackEvent('save_image'); downloadImage() }}
@@ -2022,6 +2147,7 @@ export default function App() {
   const [tabCode, setTabCode] = useState<string | null>(null)
   const [myPersonId, setMyPersonId] = useState<number | null>(null)
   const [conflictWarning, setConflictWarning] = useState<string | null>(null)
+  const [editingBillId, setEditingBillId] = useState<string | null>(null)
 
   // Heartbeat — keep session alive and detect conflicts
   useEffect(() => {
@@ -2049,6 +2175,17 @@ export default function App() {
     return () => clearInterval(interval)
   }, [tabCode, myPersonId, screen, people])
 
+  const syncBillsToKV = async (bills: Bill[], updatedPeople?: Person[]) => {
+    if (!tabCode || !myPersonId) return
+    try {
+      await fetch('/api/tab/update-bills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: tabCode, bills, people: updatedPeople ?? people, myPersonId }),
+      })
+    } catch { /* non-fatal */ }
+  }
+
   const handleSetupDone = async (ppl: Person[], pid: number) => {
     setPeople(ppl)
     setMyPersonId(pid)
@@ -2067,13 +2204,17 @@ export default function App() {
     setScreen('receipt')
   }
 
-  const handleJoined = (tab: TabData, pid: number) => {
+  const handleJoined = (tab: TabData, pid: number, destination: 'receipt' | 'results') => {
     setPeople(tab.people)
     setMyPersonId(pid)
     setTabCode(tab.code)
     setCompletedBills(tab.bills)
+    setItems([])
+    setExtras([])
+    setReceiptTotal(0)
+    setCurrentPayerId(null)
     trackEvent('tab_joined')
-    setScreen('receipt')
+    setScreen(destination)
   }
 
   const handleReceiptDone = (newItems: ReceiptItem[], newExtras: Extra[], total: number, payerId: number | null) => {
@@ -2086,22 +2227,30 @@ export default function App() {
 
   const handleAssignDone = async (assignedItems: ReceiptItem[]) => {
     setItems(assignedItems)
-    if (tabCode && myPersonId !== null) {
-      const bill: Bill = {
-        id: `bill-${Date.now()}`,
-        payerId: currentPayerId,
-        items: assignedItems,
-        extras,
-        receiptTotal,
+    if (editingBillId !== null) {
+      // Replace the existing bill in completedBills
+      const updatedBill: Bill = { id: editingBillId, payerId: currentPayerId, items: assignedItems, extras, receiptTotal }
+      const updatedBills = completedBills.map(b => b.id === editingBillId ? updatedBill : b)
+      setCompletedBills(updatedBills)
+      setEditingBillId(null)
+      setItems([])
+      setExtras([])
+      setReceiptTotal(0)
+      setCurrentPayerId(null)
+      await syncBillsToKV(updatedBills)
+    } else {
+      // New bill
+      if (tabCode && myPersonId !== null) {
+        const bill: Bill = { id: `bill-${Date.now()}`, payerId: currentPayerId, items: assignedItems, extras, receiptTotal }
+        try {
+          await fetch('/api/tab/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: tabCode, bill, people, myPersonId }),
+          })
+          trackEvent('bill_saved_to_tab')
+        } catch { /* non-fatal */ }
       }
-      try {
-        await fetch('/api/tab/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: tabCode, bill, people, myPersonId }),
-        })
-        trackEvent('bill_saved_to_tab')
-      } catch { /* non-fatal */ }
     }
     setScreen('results')
   }
@@ -2111,18 +2260,68 @@ export default function App() {
   }
 
   const handleAddAnotherBill = () => {
-    setCompletedBills(prev => [...prev, {
-      id: `bill-${Date.now()}`,
-      payerId: currentPayerId,
-      items,
-      extras,
-      receiptTotal,
-    }])
+    // Move current bill to completedBills if not empty
+    if (items.length > 0 || receiptTotal > 0) {
+      setCompletedBills(prev => [...prev, {
+        id: `bill-${Date.now()}`,
+        payerId: currentPayerId,
+        items,
+        extras,
+        receiptTotal,
+      }])
+    }
     setItems([])
     setExtras([])
     setReceiptTotal(0)
     setCurrentPayerId(null)
     setScreen('receipt')
+  }
+
+  const handleDeleteBill = async (billId: string) => {
+    let updatedBills: Bill[]
+    if (billId === 'current') {
+      setItems([])
+      setExtras([])
+      setReceiptTotal(0)
+      setCurrentPayerId(null)
+      updatedBills = completedBills
+    } else {
+      updatedBills = completedBills.filter(b => b.id !== billId)
+      setCompletedBills(updatedBills)
+    }
+    await syncBillsToKV(updatedBills)
+    trackEvent('bill_deleted')
+  }
+
+  const handleEditBill = (billId: string) => {
+    const bill = billId === 'current'
+      ? { id: 'current', payerId: currentPayerId, items, extras, receiptTotal }
+      : completedBills.find(b => b.id === billId)
+    if (!bill) return
+    // Remove from completedBills temporarily (will be re-added after edit)
+    if (billId !== 'current') {
+      setCompletedBills(prev => prev.filter(b => b.id !== billId))
+    }
+    setItems(bill.items)
+    setExtras(bill.extras)
+    setReceiptTotal(bill.receiptTotal)
+    setCurrentPayerId(bill.payerId)
+    setEditingBillId(billId)
+    setScreen('assign')
+  }
+
+  const handleChangePayer = async (billId: string, newPayerId: number) => {
+    let updatedBills: Bill[]
+    if (billId === 'current') {
+      setCurrentPayerId(newPayerId)
+      updatedBills = [...completedBills, { id: 'current', payerId: newPayerId, items, extras, receiptTotal }]
+    } else {
+      updatedBills = completedBills.map(b => b.id === billId ? { ...b, payerId: newPayerId } : b)
+      setCompletedBills(updatedBills)
+    }
+    await syncBillsToKV(
+      billId === 'current' ? completedBills : updatedBills
+    )
   }
 
   const handleRefresh = async () => {
@@ -2132,14 +2331,12 @@ export default function App() {
       if (!res.ok) return
       const tab: TabData = await res.json()
       setPeople(tab.people)
-      setCompletedBills(tab.bills.slice(0, -1)) // all but last become completedBills
-      const last = tab.bills[tab.bills.length - 1]
-      if (last) {
-        setItems(last.items)
-        setExtras(last.extras)
-        setReceiptTotal(last.receiptTotal)
-        setCurrentPayerId(last.payerId)
-      }
+      // All KV bills become completedBills; clear current bill state
+      setCompletedBills(tab.bills)
+      setItems([])
+      setExtras([])
+      setReceiptTotal(0)
+      setCurrentPayerId(null)
       trackEvent('tab_refreshed')
     } catch { /* silent */ }
   }
@@ -2153,6 +2350,7 @@ export default function App() {
     setTabCode(null)
     setMyPersonId(null)
     setConflictWarning(null)
+    setEditingBillId(null)
     setScreen('setup')
   }
 
@@ -2185,7 +2383,17 @@ export default function App() {
             receiptTotal={receiptTotal}
             people={people}
             onDone={handleAssignDone}
-            onBack={() => setScreen('receipt')}
+            onBack={() => {
+              if (editingBillId !== null) {
+                // Restore the bill being edited back to completedBills on cancel
+                const bill: Bill = { id: editingBillId, payerId: currentPayerId, items, extras, receiptTotal }
+                if (editingBillId !== 'current') {
+                  setCompletedBills(prev => [...prev, bill])
+                }
+                setEditingBillId(null)
+              }
+              setScreen('results')
+            }}
             onAddPerson={handleAddPerson}
           />
         )}
@@ -2203,6 +2411,9 @@ export default function App() {
             onBack={() => setScreen('assign')}
             onAddBill={handleAddAnotherBill}
             onRefresh={handleRefresh}
+            onDeleteBill={handleDeleteBill}
+            onEditBill={handleEditBill}
+            onChangePayer={handleChangePayer}
           />
         )}
       </div>
