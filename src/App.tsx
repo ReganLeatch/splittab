@@ -703,6 +703,7 @@ function AssignScreen({
   onDone,
   onBack,
   onAddPerson,
+  isEditing,
 }: {
   items: ReceiptItem[]
   extras: Extra[]
@@ -711,6 +712,7 @@ function AssignScreen({
   onDone: (items: ReceiptItem[]) => void
   onBack: () => void
   onAddPerson: (person: Person) => void
+  isEditing?: boolean
 }) {
   const [localItems, setLocalItems] = useState(items)
   const [addingPerson, setAddingPerson] = useState(false)
@@ -1049,7 +1051,7 @@ function AssignScreen({
           marginTop: 4,
         }}
       >
-        {!allAssigned ? 'Assign all items first' : 'Calculate Split →'}
+        {!allAssigned ? 'Assign all items first' : isEditing ? 'Confirm Edit ✓' : 'Calculate Split →'}
       </button>
     </div>
   )
@@ -2401,6 +2403,7 @@ export default function App() {
             receiptTotal={receiptTotal}
             people={people}
             onDone={handleAssignDone}
+            isEditing={editingBillId !== null}
             onBack={() => {
               if (editingBillId !== null) {
                 // Bill was never removed from completedBills — just clear the borrowed current state
