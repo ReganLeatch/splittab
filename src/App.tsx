@@ -337,6 +337,11 @@ function ReceiptScreen({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [payerId, setPayerId] = useState<number | null>(null)
+  const [manualMode, setManualMode] = useState(false)
+  const [manualItemsList, setManualItemsList] = useState<{ name: string; price: number }[]>([])
+  const [manualName, setManualName] = useState('')
+  const [manualPrice, setManualPrice] = useState('')
+  const [manualTotal, setManualTotal] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
 
@@ -344,6 +349,21 @@ function ReceiptScreen({
     const reader = new FileReader()
     reader.onload = e => setImage(e.target?.result as string)
     reader.readAsDataURL(file)
+  }
+
+  const addManualLineItem = () => {
+    const name = manualName.trim()
+    const price = parseFloat(manualPrice)
+    if (!name || !price || price <= 0) return
+    setManualItemsList(prev => [...prev, { name, price }])
+    setManualName(''); setManualPrice('')
+  }
+
+  const submitManual = () => {
+    if (manualItemsList.length === 0) return
+    const items: ReceiptItem[] = manualItemsList.map(i => ({ name: i.name, price: i.price, quantity: 1, assignedTo: [] }))
+    const total = parseFloat(manualTotal) || 0
+    onDone(items, [], total, payerId)
   }
 
   const analyze = async () => {
@@ -425,49 +445,121 @@ function ReceiptScreen({
         <Logo size={26} />
       </div>
 
-      <h2 style={{ color: '#fff', fontWeight: 700, fontSize: 22, margin: 0 }}>
-        {billNumber > 1 ? `Scan Bill ${billNumber}` : 'Scan your receipt'}
-      </h2>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <h2 style={{ color: '#fff', fontWeight: 700, fontSize: 22, margin: 0 }}>
+          {billNumber > 1 ? `Bill ${billNumber}` : 'Scan your receipt'}
+        </h2>
+        <button onClick={() => { setManualMode(m => !m); setImage(null); setManualItemsList([]); setManualName(''); setManualPrice('') }} style={{
+          background: 'none', border: 'none', color: '#a78bfa', fontSize: 13,
+          cursor: 'pointer', padding: 0, textDecoration: 'underline',
+        }}>
+          {manualMode ? 'Scan a receipt instead' : 'Enter manually instead'}
+        </button>
+      </div>
 
-      {image ? (
-        <div style={{ position: 'relative' }}>
-          <img src={image} alt="receipt" style={{
-            width: '100%', borderRadius: 16, maxHeight: '50vh', objectFit: 'contain',
-            border: '1px solid rgba(255,255,255,0.1)',
-          }} />
-          <button onClick={() => setImage(null)} style={{
-            position: 'absolute', top: 10, right: 10,
-            background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: 20,
-            color: '#fff', width: 32, height: 32, cursor: 'pointer', fontSize: 16,
-          }}>×</button>
-        </div>
-      ) : (
-        <div style={glassCard({
-          padding: 32, textAlign: 'center',
-          border: '2px dashed rgba(255,255,255,0.15)',
-          display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center',
-        })}>
-          <div style={{ fontSize: 48 }}>🧾</div>
-          <p style={{ color: 'rgba(255,255,255,0.5)', margin: 0, fontSize: 15 }}>
-            Take a photo or upload from your camera roll
+      {manualMode ? (
+        /* ── Manual entry mode ── */
+        <div style={glassCard({ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 })}>
+          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, margin: 0 }}>
+            Add items one by one, then assign them on the next screen.
           </p>
-          <div style={{ display: 'flex', gap: 10, width: '100%' }}>
-            <button onClick={() => cameraRef.current?.click()} style={{
-              flex: 1,
-              background: 'linear-gradient(135deg, #7C3AED, #EC4899)',
-              border: 'none', borderRadius: 12, color: '#fff',
-              fontWeight: 600, fontSize: 15, padding: '13px 0', cursor: 'pointer',
-              boxShadow: '0 4px 20px rgba(124,58,237,0.4)',
-            }}>📷 Camera</button>
-            <button onClick={() => fileRef.current?.click()} style={{
-              flex: 1,
-              background: 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.15)',
-              borderRadius: 12, color: '#fff',
-              fontWeight: 600, fontSize: 15, padding: '13px 0', cursor: 'pointer',
-            }}>📁 Gallery</button>
+
+          {/* Added items list */}
+          {manualItemsList.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {manualItemsList.map((item, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', borderRadius: 10, padding: '8px 12px' }}>
+                  <span style={{ color: '#fff', fontSize: 14 }}>{item.name}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ color: '#a78bfa', fontWeight: 700, fontSize: 14 }}>{fmt(item.price)}</span>
+                    <button onClick={() => setManualItemsList(prev => prev.filter((_, j) => j !== i))} style={{
+                      background: 'none', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', fontSize: 16, padding: 0,
+                    }}>×</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add item form */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              placeholder="Item name…"
+              value={manualName}
+              onChange={e => setManualName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addManualLineItem()}
+              style={{ flex: 2, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '10px 12px', color: '#fff', fontSize: 14, outline: 'none' }}
+            />
+            <input
+              placeholder="Price"
+              value={manualPrice}
+              onChange={e => setManualPrice(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addManualLineItem()}
+              type="number" inputMode="decimal"
+              style={{ flex: 1, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '10px 12px', color: '#fff', fontSize: 14, outline: 'none' }}
+            />
+            <button onClick={addManualLineItem} style={{
+              background: 'linear-gradient(135deg, #7C3AED, #EC4899)', border: 'none',
+              borderRadius: 10, color: '#fff', fontWeight: 700, padding: '10px 14px', cursor: 'pointer', fontSize: 16,
+            }}>+</button>
+          </div>
+
+          {/* Optional total */}
+          <div>
+            <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, margin: '0 0 6px' }}>
+              Bill total (optional — include if there are taxes/charges on top)
+            </p>
+            <input
+              placeholder="e.g. 52.50"
+              value={manualTotal}
+              onChange={e => setManualTotal(e.target.value)}
+              type="number" inputMode="decimal"
+              style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '10px 12px', color: '#fff', fontSize: 14, outline: 'none' }}
+            />
           </div>
         </div>
+      ) : (
+        /* ── Scan mode ── */
+        <>
+          {image ? (
+            <div style={{ position: 'relative' }}>
+              <img src={image} alt="receipt" style={{
+                width: '100%', borderRadius: 16, maxHeight: '50vh', objectFit: 'contain',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }} />
+              <button onClick={() => setImage(null)} style={{
+                position: 'absolute', top: 10, right: 10,
+                background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: 20,
+                color: '#fff', width: 32, height: 32, cursor: 'pointer', fontSize: 16,
+              }}>×</button>
+            </div>
+          ) : (
+            <div style={glassCard({
+              padding: 32, textAlign: 'center',
+              border: '2px dashed rgba(255,255,255,0.15)',
+              display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center',
+            })}>
+              <div style={{ fontSize: 48 }}>🧾</div>
+              <p style={{ color: 'rgba(255,255,255,0.5)', margin: 0, fontSize: 15 }}>
+                Take a photo or upload from your camera roll
+              </p>
+              <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+                <button onClick={() => cameraRef.current?.click()} style={{
+                  flex: 1, background: 'linear-gradient(135deg, #7C3AED, #EC4899)',
+                  border: 'none', borderRadius: 12, color: '#fff',
+                  fontWeight: 600, fontSize: 15, padding: '13px 0', cursor: 'pointer',
+                  boxShadow: '0 4px 20px rgba(124,58,237,0.4)',
+                }}>📷 Camera</button>
+                <button onClick={() => fileRef.current?.click()} style={{
+                  flex: 1, background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: 12, color: '#fff',
+                  fontWeight: 600, fontSize: 15, padding: '13px 0', cursor: 'pointer',
+                }}>📁 Gallery</button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <input ref={cameraRef} type="file" accept="image/*" capture="environment"
@@ -508,21 +600,38 @@ function ReceiptScreen({
         </div>
       </div>
 
-      <button
-        onClick={analyze}
-        disabled={!image || loading}
-        style={{
-          background: (!image || loading) ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg, #7C3AED, #EC4899)',
-          border: 'none', borderRadius: 16, color: '#fff',
-          fontWeight: 700, fontSize: 17, padding: '16px',
-          cursor: (!image || loading) ? 'not-allowed' : 'pointer',
-          boxShadow: (!image || loading) ? 'none' : '0 6px 28px rgba(124,58,237,0.5)',
-          opacity: (!image || loading) ? 0.5 : 1,
-          transition: 'all 0.2s',
-        }}
-      >
-        {loading ? 'Analysing…' : 'Extract Items →'}
-      </button>
+      {manualMode ? (
+        <button
+          onClick={submitManual}
+          disabled={manualItemsList.length === 0}
+          style={{
+            background: manualItemsList.length === 0 ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg, #7C3AED, #EC4899)',
+            border: 'none', borderRadius: 16, color: '#fff',
+            fontWeight: 700, fontSize: 17, padding: '16px',
+            cursor: manualItemsList.length === 0 ? 'not-allowed' : 'pointer',
+            opacity: manualItemsList.length === 0 ? 0.5 : 1,
+            transition: 'all 0.2s',
+          }}
+        >
+          {manualItemsList.length === 0 ? 'Add at least one item' : `Assign ${manualItemsList.length} item${manualItemsList.length !== 1 ? 's' : ''} →`}
+        </button>
+      ) : (
+        <button
+          onClick={analyze}
+          disabled={!image || loading}
+          style={{
+            background: (!image || loading) ? 'rgba(255,255,255,0.08)' : 'linear-gradient(135deg, #7C3AED, #EC4899)',
+            border: 'none', borderRadius: 16, color: '#fff',
+            fontWeight: 700, fontSize: 17, padding: '16px',
+            cursor: (!image || loading) ? 'not-allowed' : 'pointer',
+            boxShadow: (!image || loading) ? 'none' : '0 6px 28px rgba(124,58,237,0.5)',
+            opacity: (!image || loading) ? 0.5 : 1,
+            transition: 'all 0.2s',
+          }}
+        >
+          {loading ? 'Analysing…' : 'Extract Items →'}
+        </button>
+      )}
     </div>
   )
 }
@@ -911,6 +1020,8 @@ function ResultsScreen({
   onAddBill: () => void
 }) {
   const [showDonationModal, setShowDonationModal] = useState(false)
+  const [expandedPersonIds, setExpandedPersonIds] = useState<number[]>([])
+  const [showExplanation, setShowExplanation] = useState(false)
   const HEADLINES = [
     "You just avoided the most awkward conversation of the night.",
     "The bill is split. The developer is still hungry.",
@@ -1026,6 +1137,10 @@ function ResultsScreen({
           const c = COLORS[person.colorIdx % COLORS.length]
           const myItems = items.filter(i => i.assignedTo.includes(person.id))
           const allMyItems = allBills.flatMap(b => b.items.filter(i => i.assignedTo.includes(person.id)))
+          const isExpanded = expandedPersonIds.includes(person.id)
+          const toggleExpand = () => setExpandedPersonIds(prev =>
+            prev.includes(person.id) ? prev.filter(id => id !== person.id) : [...prev, person.id]
+          )
 
           return (
             <div key={person.id} style={glassCard({ padding: 18, overflow: 'hidden', position: 'relative' })}>
@@ -1041,32 +1156,65 @@ function ResultsScreen({
                   <div style={{ color: '#fff', fontWeight: 700, fontSize: 17 }}>{person.name}</div>
                   <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{(() => { const u = allMyItems.reduce((s, i) => s + i.quantity, 0); return `${u} item${u !== 1 ? 's' : ''}` })()}</div>
                 </div>
-                <div style={{
-                  fontSize: 26, fontWeight: 800,
-                  background: `linear-gradient(135deg, ${c.bg}, #f9a8d4)`,
-                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
-                }}>{fmt(total)}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {isMultiBill && (
+                    <button onClick={toggleExpand} style={{
+                      background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: 8, color: 'rgba(255,255,255,0.5)', fontSize: 12,
+                      padding: '4px 10px', cursor: 'pointer', fontWeight: 600,
+                    }}>{isExpanded ? '▲ Hide' : '▼ Details'}</button>
+                  )}
+                  <div style={{
+                    fontSize: 26, fontWeight: 800,
+                    background: `linear-gradient(135deg, ${c.bg}, #f9a8d4)`,
+                    WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                  }}>{fmt(total)}</div>
+                </div>
               </div>
 
               {/* Item breakdown */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {isMultiBill ? (
-                  // Multi-bill: show per-bill subtotals
+                  // Multi-bill: per-bill subtotals, expandable to full detail
                   allBills.map((bill, bi) => {
-                    const share = calcBillShare(bill).get(person.id) ?? 0
+                    const billShare = calcBillShare(bill)
+                    const share = billShare.get(person.id) ?? 0
                     if (share < 0.005) return null
+                    const billItems = bill.items.filter(i => i.assignedTo.includes(person.id))
+                    const billSub = bill.items.reduce((s, i) => s + i.price, 0)
+                    const billCharges = bill.receiptTotal > 0 ? Math.max(0, bill.receiptTotal - billSub) : bill.extras.reduce((s, e) => s + e.price, 0)
+                    const billItemT = billItems.reduce((s, i) => s + i.price / i.assignedTo.length, 0)
+                    const billChargeShare = billCharges > 0.005 && billSub > 0 ? (billItemT / billSub) * billCharges : 0
+                    const payerName = bill.payerId !== null ? people.find(p => p.id === bill.payerId)?.name : null
                     return (
-                      <div key={bi} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                        <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>
-                          Bill {bi + 1}
-                          {bill.payerId !== null && (
-                            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
-                              {' '}· paid by {people.find(p => p.id === bill.payerId)?.name}
-                            </span>
-                          )}
-                        </span>
-                        <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>{fmt(share)}</span>
+                      <div key={bi}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>
+                            Bill {bi + 1}
+                            {payerName && <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}> · paid by {payerName}</span>}
+                          </span>
+                          <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>{fmt(share)}</span>
+                        </div>
+                        {isExpanded && billItems.length > 0 && (
+                          <div style={{ marginTop: 6, marginLeft: 12, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                            {billItems.map((item, ii) => (
+                              <div key={ii} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ color: 'rgba(255,255,255,0.38)', fontSize: 12 }}>
+                                  {item.quantity > 1 && `${item.quantity}× `}{item.name}
+                                  {item.assignedTo.length > 1 && <span style={{ color: 'rgba(255,255,255,0.25)' }}> ÷{item.assignedTo.length}</span>}
+                                </span>
+                                <span style={{ color: 'rgba(255,255,255,0.38)', fontSize: 12 }}>{fmt(item.price / item.assignedTo.length)}</span>
+                              </div>
+                            ))}
+                            {billChargeShare > 0.005 && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ color: 'rgba(167,139,250,0.6)', fontSize: 12 }}>Taxes &amp; charges</span>
+                                <span style={{ color: 'rgba(167,139,250,0.6)', fontSize: 12 }}>{fmt(billChargeShare)}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )
                   })
@@ -1137,20 +1285,102 @@ function ResultsScreen({
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {settlement.map((t, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{
-                    flex: 1, background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: '12px 14px',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  }}>
-                    <span style={{ color: '#fff', fontSize: 14 }}>
-                      <span style={{ fontWeight: 700 }}>{t.from}</span>
-                      <span style={{ color: 'rgba(255,255,255,0.4)' }}> pays </span>
-                      <span style={{ fontWeight: 700 }}>{t.to}</span>
-                    </span>
-                    <span style={{ color: '#a78bfa', fontWeight: 800, fontSize: 16 }}>{fmt(t.amount)}</span>
-                  </div>
+                <div key={i} style={{
+                  background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: '12px 14px',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                  <span style={{ color: '#fff', fontSize: 14 }}>
+                    <span style={{ fontWeight: 700 }}>{t.from}</span>
+                    <span style={{ color: 'rgba(255,255,255,0.4)' }}> pays </span>
+                    <span style={{ fontWeight: 700 }}>{t.to}</span>
+                  </span>
+                  <span style={{ color: '#a78bfa', fontWeight: 800, fontSize: 16 }}>{fmt(t.amount)}</span>
                 </div>
               ))}
+
+              {/* Explanation toggle */}
+              <button onClick={() => setShowExplanation(v => !v)} style={{
+                background: 'none', border: 'none', color: 'rgba(167,139,250,0.6)',
+                fontSize: 12, cursor: 'pointer', padding: '4px 0', textAlign: 'left',
+                textDecoration: 'underline',
+              }}>
+                {showExplanation ? '▲ Hide calculation' : '▼ How was this calculated?'}
+              </button>
+
+              {showExplanation && (() => {
+                // Build explanation data
+                const consumed = new Map<number, number>()
+                const paid = new Map<number, number>()
+                people.forEach(p => { consumed.set(p.id, 0); paid.set(p.id, 0) })
+                allBills.forEach(bill => {
+                  const share = calcBillShare(bill)
+                  people.forEach(p => consumed.set(p.id, (consumed.get(p.id) ?? 0) + (share.get(p.id) ?? 0)))
+                  if (bill.payerId !== null) {
+                    paid.set(bill.payerId, (paid.get(bill.payerId) ?? 0) + billEffectiveTotal(bill))
+                  }
+                })
+                const net = people.map(p => ({
+                  p, consumed: consumed.get(p.id) ?? 0,
+                  paid: paid.get(p.id) ?? 0,
+                  net: (paid.get(p.id) ?? 0) - (consumed.get(p.id) ?? 0),
+                }))
+                return (
+                  <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                    {/* Step 1 */}
+                    <div>
+                      <p style={{ color: '#a78bfa', fontWeight: 700, fontSize: 12, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Step 1 — What each person consumed</p>
+                      {net.map(({ p, consumed: c }) => (
+                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>{p.name}</span>
+                          <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13 }}>{fmt(c)}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Step 2 */}
+                    <div>
+                      <p style={{ color: '#a78bfa', fontWeight: 700, fontSize: 12, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Step 2 — What each person paid</p>
+                      {net.map(({ p, paid: pd }) => {
+                        const theirBills = allBills.filter(b => b.payerId === p.id)
+                        return (
+                          <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
+                              {p.name}
+                              {theirBills.length > 0 && (
+                                <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
+                                  {' '}(Bill {theirBills.map(b => allBills.indexOf(b) + 1).join(', Bill ')})
+                                </span>
+                              )}
+                            </span>
+                            <span style={{ color: pd > 0 ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.3)', fontSize: 13 }}>{pd > 0 ? fmt(pd) : '—'}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Step 3 */}
+                    <div>
+                      <p style={{ color: '#a78bfa', fontWeight: 700, fontSize: 12, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Step 3 — Net balance (paid − consumed)</p>
+                      {net.map(({ p, paid: pd, consumed: c, net: n }) => (
+                        <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 13 }}>
+                            {p.name}
+                            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}> {fmt(pd)} − {fmt(c)}</span>
+                          </span>
+                          <span style={{ color: n > 0.005 ? '#34d399' : n < -0.005 ? '#f87171' : 'rgba(255,255,255,0.4)', fontWeight: 700, fontSize: 13 }}>
+                            {n > 0.005 ? `+${fmt(n)} owed to them` : n < -0.005 ? `−${fmt(Math.abs(n))} they owe` : '✓ settled'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12, margin: 0 }}>
+                      The transfers above settle all debts using the fewest possible payments.
+                    </p>
+                  </div>
+                )
+              })()}
             </div>
           )}
         </div>
