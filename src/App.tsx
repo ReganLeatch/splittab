@@ -2226,31 +2226,38 @@ export default function App() {
   }
 
   const handleAssignDone = async (assignedItems: ReceiptItem[]) => {
-    setItems(assignedItems)
     if (editingBillId !== null) {
-      // Replace the existing bill in completedBills
       const updatedBill: Bill = { id: editingBillId, payerId: currentPayerId, items: assignedItems, extras, receiptTotal }
-      const updatedBills = completedBills.map(b => b.id === editingBillId ? updatedBill : b)
-      setCompletedBills(updatedBills)
-      setEditingBillId(null)
-      setItems([])
-      setExtras([])
-      setReceiptTotal(0)
-      setCurrentPayerId(null)
-      await syncBillsToKV(updatedBills)
-    } else {
-      // New bill
-      if (tabCode && myPersonId !== null) {
-        const bill: Bill = { id: `bill-${Date.now()}`, payerId: currentPayerId, items: assignedItems, extras, receiptTotal }
-        try {
-          await fetch('/api/tab/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: tabCode, bill, people, myPersonId }),
-          })
-          trackEvent('bill_saved_to_tab')
-        } catch { /* non-fatal */ }
+      if (editingBillId === 'current') {
+        // Just update the current bill state in-place
+        setItems(assignedItems)
+      } else {
+        // Replace in completedBills (bill is still there since we didn't remove it)
+        const updatedBills = completedBills.map(b => b.id === editingBillId ? updatedBill : b)
+        setCompletedBills(updatedBills)
+        // Clear current state (we were borrowing it for editing)
+        setItems([])
+        setExtras([])
+        setReceiptTotal(0)
+        setCurrentPayerId(null)
+        await syncBillsToKV(updatedBills)
       }
+      setEditingBillId(null)
+      setScreen('results')
+      return
+    }
+    // Normal new bill
+    setItems(assignedItems)
+    if (tabCode && myPersonId !== null) {
+      const bill: Bill = { id: `bill-${Date.now()}`, payerId: currentPayerId, items: assignedItems, extras, receiptTotal }
+      try {
+        await fetch('/api/tab/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: tabCode, bill, people, myPersonId }),
+        })
+        trackEvent('bill_saved_to_tab')
+      } catch { /* non-fatal */ }
     }
     setScreen('results')
   }
@@ -2298,10 +2305,8 @@ export default function App() {
       ? { id: 'current', payerId: currentPayerId, items, extras, receiptTotal }
       : completedBills.find(b => b.id === billId)
     if (!bill) return
-    // Remove from completedBills temporarily (will be re-added after edit)
-    if (billId !== 'current') {
-      setCompletedBills(prev => prev.filter(b => b.id !== billId))
-    }
+    // Load bill data into current state for editing.
+    // We do NOT remove it from completedBills — handleAssignDone will replace it in-place via .map()
     setItems(bill.items)
     setExtras(bill.extras)
     setReceiptTotal(bill.receiptTotal)
@@ -2385,10 +2390,12 @@ export default function App() {
             onDone={handleAssignDone}
             onBack={() => {
               if (editingBillId !== null) {
-                // Restore the bill being edited back to completedBills on cancel
-                const bill: Bill = { id: editingBillId, payerId: currentPayerId, items, extras, receiptTotal }
+                // Bill was never removed from completedBills — just clear the borrowed current state
                 if (editingBillId !== 'current') {
-                  setCompletedBills(prev => [...prev, bill])
+                  setItems([])
+                  setExtras([])
+                  setReceiptTotal(0)
+                  setCurrentPayerId(null)
                 }
                 setEditingBillId(null)
               }
