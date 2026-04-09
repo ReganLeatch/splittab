@@ -18,6 +18,13 @@ interface ReceiptItem {
   assignedTo: number[]
 }
 interface Extra { name: string; price: number }
+interface Bill {
+  id: string
+  payerId: number | null
+  items: ReceiptItem[]
+  extras: Extra[]
+  receiptTotal: number
+}
 type Screen = 'setup' | 'receipt' | 'assign' | 'results'
 
 // ─── Design Tokens ───────────────────────────────────────────────────────────
@@ -72,6 +79,55 @@ function rrect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h
   ctx.lineTo(x, y + r)
   ctx.quadraticCurveTo(x, y, x + r, y)
   ctx.closePath()
+}
+
+// Returns minimum set of transfers to settle all debts across multiple bills
+function calculateSettlement(people: Person[], allBills: Bill[]): { from: string; to: string; amount: number }[] {
+  const net = new Map<number, number>()
+  people.forEach(p => net.set(p.id, 0))
+
+  allBills.forEach(bill => {
+    // Payer gets credited the full bill amount
+    if (bill.payerId !== null) {
+      net.set(bill.payerId, (net.get(bill.payerId) ?? 0) + (
+        bill.receiptTotal > 0 ? bill.receiptTotal
+          : bill.items.reduce((s, i) => s + i.price, 0) + bill.extras.reduce((s, e) => s + e.price, 0)
+      ))
+    }
+    // Each person is debited their share of this bill
+    const sub = bill.items.reduce((s, i) => s + i.price, 0)
+    const charges = bill.receiptTotal > 0
+      ? Math.max(0, bill.receiptTotal - sub)
+      : bill.extras.reduce((s, e) => s + e.price, 0)
+    const itemShares = new Map<number, number>()
+    people.forEach(p => itemShares.set(p.id, 0))
+    bill.items.forEach(item => {
+      item.assignedTo.forEach(id => {
+        itemShares.set(id, (itemShares.get(id) ?? 0) + item.price / item.assignedTo.length)
+      })
+    })
+    people.forEach(p => {
+      const itemT = itemShares.get(p.id) ?? 0
+      const chargeShare = charges > 0.005 && sub > 0 ? (itemT / sub) * charges : 0
+      net.set(p.id, (net.get(p.id) ?? 0) - (itemT + chargeShare))
+    })
+  })
+
+  const creds = people.map(p => ({ name: p.name, amount: net.get(p.id) ?? 0 })).filter(x => x.amount > 0.005).sort((a, b) => b.amount - a.amount)
+  const debts = people.map(p => ({ name: p.name, amount: -(net.get(p.id) ?? 0) })).filter(x => x.amount > 0.005).sort((a, b) => b.amount - a.amount)
+
+  const transfers: { from: string; to: string; amount: number }[] = []
+  const c = creds.map(x => ({ ...x }))
+  const d = debts.map(x => ({ ...x }))
+  let i = 0, j = 0
+  while (i < c.length && j < d.length) {
+    const t = Math.min(c[i].amount, d[j].amount)
+    if (t > 0.005) transfers.push({ from: d[j].name, to: c[i].name, amount: t })
+    c[i].amount -= t; d[j].amount -= t
+    if (c[i].amount < 0.005) i++
+    if (d[j].amount < 0.005) j++
+  }
+  return transfers
 }
 
 // ─── Background Orbs ─────────────────────────────────────────────────────────
@@ -267,15 +323,20 @@ function SetupScreen({
 
 // ─── Receipt Screen ───────────────────────────────────────────────────────────
 function ReceiptScreen({
+  people,
+  billNumber,
   onDone,
   onBack,
 }: {
-  onDone: (items: ReceiptItem[], extras: Extra[], receiptTotal: number) => void
+  people: Person[]
+  billNumber: number
+  onDone: (items: ReceiptItem[], extras: Extra[], receiptTotal: number, payerId: number | null) => void
   onBack: () => void
 }) {
   const [image, setImage] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [payerId, setPayerId] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
 
@@ -343,7 +404,7 @@ function ReceiptScreen({
         return
       }
 
-      onDone(items, extras, receiptTotal)
+      onDone(items, extras, receiptTotal, payerId)
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       const detail = (e as { status?: number; error?: { message?: string } })
@@ -364,7 +425,9 @@ function ReceiptScreen({
         <Logo size={26} />
       </div>
 
-      <h2 style={{ color: '#fff', fontWeight: 700, fontSize: 22, margin: 0 }}>Scan your receipt</h2>
+      <h2 style={{ color: '#fff', fontWeight: 700, fontSize: 22, margin: 0 }}>
+        {billNumber > 1 ? `Scan Bill ${billNumber}` : 'Scan your receipt'}
+      </h2>
 
       {image ? (
         <div style={{ position: 'relative' }}>
@@ -421,6 +484,30 @@ function ReceiptScreen({
         </div>
       )}
 
+      {/* Who paid? */}
+      <div style={glassCard({ padding: 16 })}>
+        <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', margin: '0 0 12px' }}>
+          Who paid this bill? <span style={{ color: 'rgba(255,255,255,0.25)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional — needed for settlement)</span>
+        </p>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {people.map(p => {
+            const c = COLORS[p.colorIdx % COLORS.length]
+            const selected = payerId === p.id
+            return (
+              <button key={p.id} onClick={() => setPayerId(selected ? null : p.id)} style={{
+                display: 'flex', alignItems: 'center', gap: 7,
+                background: selected ? c.dim : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${selected ? c.bg : 'rgba(255,255,255,0.1)'}`,
+                borderRadius: 100, padding: '6px 12px 6px 6px', cursor: 'pointer',
+              }}>
+                <PersonAvatar person={p} size={26} active={selected} />
+                <span style={{ color: selected ? '#fff' : 'rgba(255,255,255,0.6)', fontSize: 14, fontWeight: selected ? 600 : 400 }}>{p.name}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
       <button
         onClick={analyze}
         disabled={!image || loading}
@@ -461,6 +548,9 @@ function AssignScreen({
   const [localItems, setLocalItems] = useState(items)
   const [addingPerson, setAddingPerson] = useState(false)
   const [newPersonName, setNewPersonName] = useState('')
+  const [addingManual, setAddingManual] = useState(false)
+  const [manualName, setManualName] = useState('')
+  const [manualPrice, setManualPrice] = useState('')
 
   const doAddPerson = () => {
     const name = newPersonName.trim()
@@ -525,6 +615,14 @@ function AssignScreen({
       const insertAt = prev.slice(0, firstIdx).filter(i => i.splitGroupId !== groupId).length
       return [...rest.slice(0, insertAt), merged, ...rest.slice(insertAt)]
     })
+  }
+
+  const addManualItem = () => {
+    const name = manualName.trim()
+    const price = parseFloat(manualPrice)
+    if (!name || !price || price <= 0) return
+    setLocalItems(prev => [...prev, { name, price, quantity: 1, assignedTo: [] }])
+    setManualName(''); setManualPrice(''); setAddingManual(false)
   }
 
   const allAssigned = localItems.every(item => item.assignedTo.length > 0)
@@ -678,6 +776,58 @@ function AssignScreen({
         </div>
       )}
 
+      {/* Add manual item */}
+      <div style={glassCard({ padding: 12 })}>
+        {addingManual ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                autoFocus
+                placeholder="Item name…"
+                value={manualName}
+                onChange={e => setManualName(e.target.value)}
+                onKeyDown={e => e.key === 'Escape' && setAddingManual(false)}
+                style={{
+                  flex: 2, background: 'rgba(255,255,255,0.07)',
+                  border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10,
+                  padding: '10px 12px', color: '#fff', fontSize: 15, outline: 'none',
+                }}
+              />
+              <input
+                placeholder="Price"
+                value={manualPrice}
+                onChange={e => setManualPrice(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addManualItem(); if (e.key === 'Escape') setAddingManual(false) }}
+                type="number"
+                inputMode="decimal"
+                style={{
+                  flex: 1, background: 'rgba(255,255,255,0.07)',
+                  border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10,
+                  padding: '10px 12px', color: '#fff', fontSize: 15, outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={addManualItem} style={{
+                flex: 1, background: 'linear-gradient(135deg, #7C3AED, #EC4899)', border: 'none',
+                borderRadius: 10, color: '#fff', fontWeight: 700, padding: '10px', cursor: 'pointer', fontSize: 14,
+              }}>Add Item</button>
+              <button onClick={() => { setAddingManual(false); setManualName(''); setManualPrice('') }} style={{
+                background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 10, color: 'rgba(255,255,255,0.45)', padding: '10px 14px', cursor: 'pointer', fontSize: 14,
+              }}>✕</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAddingManual(true)} style={{
+            width: '100%', background: 'none',
+            border: '1px dashed rgba(255,255,255,0.15)', borderRadius: 10,
+            color: 'rgba(255,255,255,0.4)', fontSize: 14, fontWeight: 500,
+            padding: '10px', cursor: 'pointer',
+          }}>+ Add item manually</button>
+        )}
+      </div>
+
       {/* Add person */}
       <div style={glassCard({ padding: 12 })}>
         {addingPerson ? (
@@ -744,15 +894,21 @@ function ResultsScreen({
   extras,
   receiptTotal,
   people,
+  completedBills,
+  currentPayerId,
   onReset,
   onBack,
+  onAddBill,
 }: {
   items: ReceiptItem[]
   extras: Extra[]
   receiptTotal: number
   people: Person[]
+  completedBills: Bill[]
+  currentPayerId: number | null
   onReset: () => void
   onBack: () => void
+  onAddBill: () => void
 }) {
   const [showDonationModal, setShowDonationModal] = useState(false)
   const HEADLINES = [
@@ -763,39 +919,84 @@ function ResultsScreen({
   ]
   const headline = HEADLINES[Math.floor(Math.random() * HEADLINES.length)]
 
-  // Show donation modal after 4 seconds
   useEffect(() => {
     const t = setTimeout(() => setShowDonationModal(true), 4000)
     return () => clearTimeout(t)
   }, [])
 
-  const itemsSubtotal = items.reduce((s, i) => s + i.price, 0)
+  // All bills including the current one
+  const allBills: Bill[] = [
+    ...completedBills,
+    { id: 'current', payerId: currentPayerId, items, extras, receiptTotal },
+  ]
+  const isMultiBill = allBills.length > 1
 
-  // Ground-truth: total charges = receipt total minus all item prices
-  // Falls back to sum of extracted extras if receipt_total wasn't captured
+  // Per-bill effective total helper
+  const billEffectiveTotal = (b: Bill) =>
+    b.receiptTotal > 0 ? b.receiptTotal
+      : b.items.reduce((s, i) => s + i.price, 0) + b.extras.reduce((s, e) => s + e.price, 0)
+
+  const grandTotal = allBills.reduce((s, b) => s + billEffectiveTotal(b), 0)
+
+  // Per-person share for a single bill
+  const calcBillShare = (bill: Bill) => {
+    const sub = bill.items.reduce((s, i) => s + i.price, 0)
+    const charges = bill.receiptTotal > 0
+      ? Math.max(0, bill.receiptTotal - sub)
+      : bill.extras.reduce((s, e) => s + e.price, 0)
+    const itemShares = new Map<number, number>()
+    people.forEach(p => itemShares.set(p.id, 0))
+    bill.items.forEach(item => {
+      item.assignedTo.forEach(id => {
+        itemShares.set(id, (itemShares.get(id) ?? 0) + item.price / item.assignedTo.length)
+      })
+    })
+    const result = new Map<number, number>()
+    people.forEach(p => {
+      const itemT = itemShares.get(p.id) ?? 0
+      const chargeShare = charges > 0.005 && sub > 0 ? (itemT / sub) * charges : 0
+      result.set(p.id, itemT + chargeShare)
+    })
+    return result
+  }
+
+  // Combined per-person totals across all bills
+  const combinedTotals = new Map<number, number>()
+  people.forEach(p => combinedTotals.set(p.id, 0))
+  allBills.forEach(bill => {
+    const share = calcBillShare(bill)
+    people.forEach(p => combinedTotals.set(p.id, (combinedTotals.get(p.id) ?? 0) + (share.get(p.id) ?? 0)))
+  })
+
+  // For single bill — keep detailed charge breakdown
+  const itemsSubtotal = items.reduce((s, i) => s + i.price, 0)
   const totalCharges = receiptTotal > 0
     ? Math.max(0, receiptTotal - itemsSubtotal)
     : extras.reduce((s, e) => s + e.price, 0)
   const hasCharges = totalCharges > 0.005
-  const grandTotal = itemsSubtotal + totalCharges
 
-  // Per-person item subtotals
-  const personItemTotals = new Map<number, number>()
-  people.forEach(p => personItemTotals.set(p.id, 0))
-  items.forEach(item => {
-    item.assignedTo.forEach(id => {
-      personItemTotals.set(id, (personItemTotals.get(id) ?? 0) + item.price / item.assignedTo.length)
-    })
-  })
+  const totals = people.map(person => ({
+    person,
+    total: combinedTotals.get(person.id) ?? 0,
+    // For single bill detail display
+    itemTotal: (() => {
+      const t = new Map<number, number>()
+      people.forEach(p => t.set(p.id, 0))
+      items.forEach(item => item.assignedTo.forEach(id => t.set(id, (t.get(id) ?? 0) + item.price / item.assignedTo.length)))
+      return t.get(person.id) ?? 0
+    })(),
+    chargeShare: (() => {
+      const t = new Map<number, number>()
+      people.forEach(p => t.set(p.id, 0))
+      items.forEach(item => item.assignedTo.forEach(id => t.set(id, (t.get(id) ?? 0) + item.price / item.assignedTo.length)))
+      const itemT = t.get(person.id) ?? 0
+      return hasCharges && itemsSubtotal > 0 ? (itemT / itemsSubtotal) * totalCharges : 0
+    })(),
+  })).sort((a, b) => b.total - a.total)
 
-  const totals = people.map(person => {
-    const itemTotal = personItemTotals.get(person.id) ?? 0
-    // Proportional share of verified charges
-    const chargeShare = hasCharges && itemsSubtotal > 0
-      ? (itemTotal / itemsSubtotal) * totalCharges
-      : 0
-    return { person, itemTotal, chargeShare, total: itemTotal + chargeShare }
-  }).sort((a, b) => b.total - a.total)
+  // Settlement — only when all bills have a payer assigned
+  const canSettle = isMultiBill && allBills.every(b => b.payerId !== null)
+  const settlement = canSettle ? calculateSettlement(people, allBills) : []
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32 }}>
@@ -824,6 +1025,7 @@ function ResultsScreen({
         {totals.map(({ person, itemTotal, chargeShare, total }) => {
           const c = COLORS[person.colorIdx % COLORS.length]
           const myItems = items.filter(i => i.assignedTo.includes(person.id))
+          const allMyItems = allBills.flatMap(b => b.items.filter(i => i.assignedTo.includes(person.id)))
 
           return (
             <div key={person.id} style={glassCard({ padding: 18, overflow: 'hidden', position: 'relative' })}>
@@ -837,7 +1039,7 @@ function ResultsScreen({
                 <PersonAvatar person={person} size={42} active label={getInitials(person.name, people.map(p => p.name))} />
                 <div style={{ flex: 1 }}>
                   <div style={{ color: '#fff', fontWeight: 700, fontSize: 17 }}>{person.name}</div>
-                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{(() => { const u = myItems.reduce((s, i) => s + i.quantity, 0); return `${u} item${u !== 1 ? 's' : ''}` })()}</div>
+                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{(() => { const u = allMyItems.reduce((s, i) => s + i.quantity, 0); return `${u} item${u !== 1 ? 's' : ''}` })()}</div>
                 </div>
                 <div style={{
                   fontSize: 26, fontWeight: 800,
@@ -849,53 +1051,124 @@ function ResultsScreen({
 
               {/* Item breakdown */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {myItems.map((item, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, flex: 1 }}>
-                      {item.quantity > 1 && (
-                        <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>{item.quantity}× </span>
-                      )}
-                      {item.name}
-                      {item.assignedTo.length > 1 && (
-                        <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}> ÷{item.assignedTo.length}</span>
-                      )}
-                    </span>
-                    <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>
-                      {fmt(item.price / item.assignedTo.length)}
-                    </span>
-                  </div>
-                ))}
-                {/* Charges row */}
-                {hasCharges && chargeShare > 0 && (
-                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', marginTop: 4, paddingTop: 5, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                    {extras.length > 0 ? extras.map((extra, ei) => {
-                      const share = itemsSubtotal > 0 ? (itemTotal / itemsSubtotal) * extra.price : 0
-                      return (
-                        <div key={ei} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ color: 'rgba(167,139,250,0.75)', fontSize: 12 }}>{extra.name}</span>
-                          <span style={{ color: 'rgba(167,139,250,0.75)', fontSize: 12 }}>{fmt(share)}</span>
-                        </div>
-                      )
-                    }) : (
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: 'rgba(167,139,250,0.75)', fontSize: 12 }}>Taxes &amp; charges</span>
-                        <span style={{ color: 'rgba(167,139,250,0.75)', fontSize: 12 }}>{fmt(chargeShare)}</span>
+                {isMultiBill ? (
+                  // Multi-bill: show per-bill subtotals
+                  allBills.map((bill, bi) => {
+                    const share = calcBillShare(bill).get(person.id) ?? 0
+                    if (share < 0.005) return null
+                    return (
+                      <div key={bi} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>
+                          Bill {bi + 1}
+                          {bill.payerId !== null && (
+                            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
+                              {' '}· paid by {people.find(p => p.id === bill.payerId)?.name}
+                            </span>
+                          )}
+                        </span>
+                        <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>{fmt(share)}</span>
+                      </div>
+                    )
+                  })
+                ) : (
+                  // Single bill: detailed item breakdown
+                  <>
+                    {myItems.map((item, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, flex: 1 }}>
+                          {item.quantity > 1 && (
+                            <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>{item.quantity}× </span>
+                          )}
+                          {item.name}
+                          {item.assignedTo.length > 1 && (
+                            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12 }}> ÷{item.assignedTo.length}</span>
+                          )}
+                        </span>
+                        <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>
+                          {fmt(item.price / item.assignedTo.length)}
+                        </span>
+                      </div>
+                    ))}
+                    {hasCharges && chargeShare > 0 && (
+                      <div style={{ borderTop: '1px solid rgba(255,255,255,0.07)', marginTop: 4, paddingTop: 5, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        {extras.length > 0 ? extras.map((extra, ei) => {
+                          const share = itemsSubtotal > 0 ? (itemTotal / itemsSubtotal) * extra.price : 0
+                          return (
+                            <div key={ei} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'rgba(167,139,250,0.75)', fontSize: 12 }}>{extra.name}</span>
+                              <span style={{ color: 'rgba(167,139,250,0.75)', fontSize: 12 }}>{fmt(share)}</span>
+                            </div>
+                          )
+                        }) : (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'rgba(167,139,250,0.75)', fontSize: 12 }}>Taxes &amp; charges</span>
+                            <span style={{ color: 'rgba(167,139,250,0.75)', fontSize: 12 }}>{fmt(chargeShare)}</span>
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
-                )}
-                {!hasCharges && extras.length > 0 && (
-                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: 4, paddingTop: 5 }}>
-                    <span style={{ color: 'rgba(52,211,153,0.65)', fontSize: 12 }}>
-                      ✓ Tax &amp; service charges included in prices
-                    </span>
-                  </div>
+                    {!hasCharges && extras.length > 0 && (
+                      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: 4, paddingTop: 5 }}>
+                        <span style={{ color: 'rgba(52,211,153,0.65)', fontSize: 12 }}>
+                          ✓ Tax &amp; service charges included in prices
+                        </span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
           )
         })}
       </div>
+
+      {/* Settlement section */}
+      {isMultiBill && (
+        <div style={glassCard({ padding: 20, background: 'rgba(124,58,237,0.07)', border: '1px solid rgba(124,58,237,0.2)' })}>
+          <p style={{ color: '#a78bfa', fontWeight: 700, fontSize: 13, margin: '0 0 12px', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+            To Settle Up
+          </p>
+          {!canSettle ? (
+            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: 0 }}>
+              Select who paid each bill to see transfer instructions.
+            </p>
+          ) : settlement.length === 0 ? (
+            <p style={{ color: 'rgba(52,211,153,0.8)', fontSize: 13, margin: 0 }}>✓ All settled — no transfers needed!</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {settlement.map((t, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{
+                    flex: 1, background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: '12px 14px',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
+                    <span style={{ color: '#fff', fontSize: 14 }}>
+                      <span style={{ fontWeight: 700 }}>{t.from}</span>
+                      <span style={{ color: 'rgba(255,255,255,0.4)' }}> pays </span>
+                      <span style={{ fontWeight: 700 }}>{t.to}</span>
+                    </span>
+                    <span style={{ color: '#a78bfa', fontWeight: 800, fontSize: 16 }}>{fmt(t.amount)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Add another bill */}
+      <button
+        onClick={onAddBill}
+        style={{
+          background: 'rgba(255,255,255,0.07)',
+          border: '1px solid rgba(255,255,255,0.15)',
+          borderRadius: 16, color: '#fff',
+          fontWeight: 600, fontSize: 16, padding: '14px',
+          cursor: 'pointer',
+        }}
+      >
+        + Add Another Bill
+      </button>
 
       <button
         onClick={() => { trackEvent('save_image'); downloadImage() }}
@@ -1256,16 +1529,19 @@ export default function App() {
   const [items, setItems] = useState<ReceiptItem[]>([])
   const [extras, setExtras] = useState<Extra[]>([])
   const [receiptTotal, setReceiptTotal] = useState(0)
+  const [completedBills, setCompletedBills] = useState<Bill[]>([])
+  const [currentPayerId, setCurrentPayerId] = useState<number | null>(null)
 
   const handleSetupDone = (ppl: Person[]) => {
     setPeople(ppl)
     setScreen('receipt')
   }
 
-  const handleReceiptDone = (newItems: ReceiptItem[], newExtras: Extra[], total: number) => {
+  const handleReceiptDone = (newItems: ReceiptItem[], newExtras: Extra[], total: number, payerId: number | null) => {
     setItems(newItems)
     setExtras(newExtras)
     setReceiptTotal(total)
+    setCurrentPayerId(payerId)
     setScreen('assign')
   }
 
@@ -1278,10 +1554,27 @@ export default function App() {
     setPeople(prev => [...prev, person])
   }
 
+  const handleAddAnotherBill = () => {
+    setCompletedBills(prev => [...prev, {
+      id: `bill-${Date.now()}`,
+      payerId: currentPayerId,
+      items,
+      extras,
+      receiptTotal,
+    }])
+    setItems([])
+    setExtras([])
+    setReceiptTotal(0)
+    setCurrentPayerId(null)
+    setScreen('receipt')
+  }
+
   const handleReset = () => {
     setItems([])
     setExtras([])
     setReceiptTotal(0)
+    setCompletedBills([])
+    setCurrentPayerId(null)
     setScreen('setup')
   }
 
@@ -1298,8 +1591,10 @@ export default function App() {
         )}
         {screen === 'receipt' && (
           <ReceiptScreen
+            people={people}
+            billNumber={completedBills.length + 1}
             onDone={handleReceiptDone}
-            onBack={() => setScreen('setup')}
+            onBack={() => completedBills.length > 0 ? setScreen('results') : setScreen('setup')}
           />
         )}
         {screen === 'assign' && (
@@ -1319,8 +1614,11 @@ export default function App() {
             extras={extras}
             receiptTotal={receiptTotal}
             people={people}
+            completedBills={completedBills}
+            currentPayerId={currentPayerId}
             onReset={handleReset}
             onBack={() => setScreen('assign')}
+            onAddBill={handleAddAnotherBill}
           />
         )}
       </div>
